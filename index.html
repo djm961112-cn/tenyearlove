@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>流星相册</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: #050510;
+            font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* ========== Canvas 背景 ========== */
+        #bg-canvas {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 0;
+        }
+
+        /* ========== 开场遮罩 ========== */
+        #intro-overlay {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 100;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            background: rgba(5,5,16,0.92);
+            transition: opacity 0.8s ease;
+        }
+        #intro-overlay.hidden {
+            opacity: 0; pointer-events: none;
+        }
+        #intro-overlay h1 {
+            color: #ffd97d;
+            font-size: 32px;
+            font-weight: 300;
+            letter-spacing: 8px;
+            margin-bottom: 12px;
+            text-shadow: 0 0 30px rgba(255,217,125,0.4);
+        }
+        #intro-overlay p {
+            color: rgba(255,255,255,0.35);
+            font-size: 14px;
+            margin-bottom: 40px;
+            letter-spacing: 2px;
+        }
+        #start-btn {
+            padding: 14px 48px;
+            border: 1px solid rgba(255,217,125,0.4);
+            border-radius: 50px;
+            background: transparent;
+            color: #ffd97d;
+            font-size: 16px;
+            letter-spacing: 4px;
+            cursor: pointer;
+            touch-action: manipulation;
+            transition: all 0.3s;
+        }
+        #start-btn:active {
+            background: rgba(255,217,125,0.15);
+            transform: scale(0.96);
+        }
+
+        /* ========== 卡片舞台 ========== */
+        #stage {
+            position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 5; pointer-events: none;
+        }
+
+        .album-card {
+            position: absolute;
+            left: 50%; top: 50%;
+            transform: translate(-50%, -50%) scale(0);
+            perspective: 1200px;
+            z-index: 10;
+            will-change: transform;
+        }
+
+        .card-inner {
+            position: relative;
+            width: 100%; height: 100%;
+            transform-style: preserve-3d;
+            transition: transform 1s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .card-inner.flipped {
+            transform: rotateY(180deg);
+        }
+
+        .card-front, .card-back {
+            position: absolute;
+            width: 100%; height: 100%;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .card-front {
+            background-size: cover;
+            background-position: center;
+            background-color: #1a1a2e;
+            border: 3px solid rgba(255,255,255,0.15);
+            box-shadow:
+                0 0 25px rgba(100,150,255,0.35),
+                0 0 50px rgba(100,150,255,0.15);
+        }
+
+        .card-back {
+            transform: rotateY(180deg);
+            background: linear-gradient(135deg, #0f0c29 0%, #1a1040 50%, #0f0c29 100%);
+            border: 3px solid rgba(255,200,100,0.25);
+            box-shadow:
+                0 0 25px rgba(255,200,100,0.25),
+                0 0 50px rgba(255,200,100,0.1);
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            padding: 28px 24px;
+        }
+
+        .card-back .deco-line {
+            width: 50px; height: 1px;
+            flex-shrink: 0;
+            background: linear-gradient(to right, transparent, rgba(255,200,100,0.7), transparent);
+        }
+
+        .card-back .card-text {
+            color: #fff;
+            font-size: 18px;
+            text-align: center;
+            line-height: 1.8;
+            margin: 14px 0;
+            flex: 1;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;       /* Firefox */
+            -ms-overflow-style: none;    /* IE */
+        }
+        .card-back .card-text::-webkit-scrollbar {
+            display: none;               /* Chrome/Safari */
+        }
+
+        .card-back .scroll-hint {
+            flex-shrink: 0;
+            color: rgba(255,200,100,0.35);
+            font-size: 11px;
+            margin-top: 8px;
+            transition: opacity 0.3s;
+        }
+        .card-back .scroll-hint.hidden {
+            opacity: 0;
+        }
+
+        /* 卡片可点击 */
+        .album-card.interactive {
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        /* ========== 底部缩略图画廊 ========== */
+        #gallery {
+            position: fixed; bottom: 14px;
+            left: 0; width: 100%;
+            display: flex; justify-content: center;
+            gap: 10px; z-index: 15;
+            padding: 0 20px;
+        }
+        .gallery-thumb {
+            width: 42px; height: 42px;
+            border-radius: 10px;
+            background-size: cover; background-position: center;
+            border: 2px solid rgba(255,255,255,0.25);
+            box-shadow: 0 0 10px rgba(100,150,255,0.25);
+            opacity: 0; transform: scale(0);
+            transition: all 0.5s cubic-bezier(0.34,1.56,0.64,1);
+        }
+        .gallery-thumb.visible {
+            opacity: 1; transform: scale(1);
+        }
+
+        /* ========== 提示 & 进度 & 音乐 ========== */
+        #hint {
+            position: fixed; bottom: 70px;
+            left: 50%; transform: translateX(-50%);
+            color: rgba(255,255,255,0.4);
+            font-size: 13px; z-index: 20;
+            white-space: nowrap;
+            animation: hintSlide 2.5s ease-in-out infinite;
+            transition: opacity 0.5s;
+        }
+        @keyframes hintSlide {
+            0%, 100% { opacity: 0.3; transform: translateX(-50%); }
+            50% { opacity: 0.7; transform: translateX(calc(-50% + 12px)); }
+        }
+
+        #progress {
+            position: fixed; top: 20px; right: 20px;
+            color: rgba(255,255,255,0.35);
+            font-size: 13px; z-index: 20;
+            letter-spacing: 1px;
+        }
+
+        #music-btn {
+            position: fixed; top: 18px; left: 18px;
+            width: 38px; height: 38px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.15);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 20; cursor: pointer;
+            font-size: 15px; pointer-events: auto;
+            touch-action: manipulation;
+            transition: background 0.2s;
+        }
+        #music-btn:active { background: rgba(255,255,255,0.12); }
+
+        /* ========== 结束语 ========== */
+        #end-msg {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: rgba(255,217,125,0.9);
+            font-size: 22px;
+            text-align: center;
+            letter-spacing: 4px;
+            z-index: 25; pointer-events: none;
+            opacity: 0; transition: opacity 1.5s;
+            text-shadow: 0 0 25px rgba(255,217,125,0.4);
+        }
+        #end-msg.visible { opacity: 1; }
+    </style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<!-- 开场 -->
+<div id="intro-overlay">
+    <h1>流星相册</h1>
+    <p>每一次触碰，点亮一段回忆</p>
+    <button id="start-btn">触碰开始</button>
+</div>
+
+<!-- 舞台 -->
+<div id="stage"></div>
+<div id="gallery"></div>
+
+<!-- UI -->
+<div id="hint" style="opacity:0">右滑触发流星</div>
+<div id="progress"></div>
+<div id="music-btn">&#9835;</div>
+<div id="end-msg">所有回忆已点亮</div>
+
+<script>
+// =====================================================
+//  配置区 —— 替换为你的图片、文字和音乐
+// =====================================================
+const albumData = [
+    { image: 'images/1.jpg', text: '最美的风景\n在路上' },
+    { image: 'images/2.jpg', text: '时光不老\n我们不散' },
+    { image: 'images/3.jpg', text: '岁月静好\n现世安稳' },
+    { image: 'images/4.jpg', text: '永恒的记忆\n珍贵的瞬间' },
+    { image: 'images/5.jpg', text: '心之所向\n素履以往' },
+];
+
+// 音乐文件路径（同目录下放 music.mp3，或填写完整 URL）
+const musicUrl = 'music.mp3';
+// =====================================================
+
+// ---------- 状态 ----------
+let currentIndex = 0;
+let isAnimating  = false;
+let audio        = null;
+let musicPlaying = false;
+let currentCard  = null;
+let started      = false;
+
+// ---------- DOM ----------
+const canvas    = document.getElementById('bg-canvas');
+const ctx       = canvas.getContext('2d');
+const stage     = document.getElementById('stage');
+const gallery   = document.getElementById('gallery');
+const hint      = document.getElementById('hint');
+const progress  = document.getElementById('progress');
+const musicBtn  = document.getElementById('music-btn');
+const endMsg    = document.getElementById('end-msg');
+const overlay   = document.getElementById('intro-overlay');
+const startBtn  = document.getElementById('start-btn');
+
+// =====================================================
+//  星空
+// =====================================================
+let stars = [];
+
+// =====================================================
+//  Canvas 尺寸
+// =====================================================
+function resize() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+    initStars();
+}
+resize();
+window.addEventListener('resize', resize);
+
+function initStars() {
+    stars = [];
+    const count = Math.floor(canvas.width * canvas.height / 4000);
+    for (let i = 0; i < count; i++) {
+        stars.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            r: Math.random() * 1.4 + 0.4,
+            phase: Math.random() * Math.PI * 2,
+            speed: 0.008 + Math.random() * 0.025
+        });
+    }
+}
+
+function drawStars() {
+    for (const s of stars) {
+        s.phase += s.speed;
+        const a = 0.25 + 0.75 * Math.abs(Math.sin(s.phase));
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,255,${a})`;
+        ctx.fill();
+    }
+}
+
+// =====================================================
+//  背景流星（装饰用）
+// =====================================================
+const bgMeteors = [];
+let bgTimer = 0;
+
+function spawnBgMeteor() {
+    bgMeteors.push({
+        x: Math.random() * canvas.width * 0.8 + canvas.width * 0.1,
+        y: -10,
+        len: 60 + Math.random() * 100,
+        speed: 5 + Math.random() * 5,
+        angle: Math.PI * 0.28 + (Math.random() - 0.5) * 0.15,
+        alpha: 0.25 + Math.random() * 0.35,
+        life: 1
+    });
+}
+
+function updateBgMeteors() {
+    for (let i = bgMeteors.length - 1; i >= 0; i--) {
+        const m = bgMeteors[i];
+        m.x += Math.cos(m.angle) * m.speed;
+        m.y += Math.sin(m.angle) * m.speed;
+        if (m.x > canvas.width + 50 || m.y > canvas.height + 50) {
+            m.life -= 0.08;
+        }
+        if (m.life <= 0) bgMeteors.splice(i, 1);
+    }
+}
+
+function drawBgMeteors() {
+    for (const m of bgMeteors) {
+        const tx = m.x - Math.cos(m.angle) * m.len;
+        const ty = m.y - Math.sin(m.angle) * m.len;
+        const grad = ctx.createLinearGradient(m.x, m.y, tx, ty);
+        const a = m.alpha * m.life;
+        grad.addColorStop(0, `rgba(210,225,255,${a})`);
+        grad.addColorStop(1, 'rgba(210,225,255,0)');
+        ctx.beginPath();
+        ctx.moveTo(m.x, m.y);
+        ctx.lineTo(tx, ty);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // 头部亮点
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,255,${a})`;
+        ctx.fill();
+    }
+}
+
+// =====================================================
+//  特殊流星（触发相册）
+//  从屏幕边缘不同区域出发，沿贝塞尔曲线自然弯向屏幕中央
+// =====================================================
+let specialMeteor = null;
+let launchVariant = 0; // 交替变化，避免连续相似
+
+// 二次贝塞尔曲线取点
+function bezier(t, p0, p1, p2) {
+    const u = 1 - t;
+    return u * u * p0 + 2 * u * t * p1 + t * t * p2;
+}
+
+function launchSpecialMeteor() {
+    const W = canvas.width, H = canvas.height;
+    const tx = W / 2;
+    const ty = H / 2;
+
+    // ---- 出发区域：上/左上/右上/左/右 五个区域轮流 + 随机偏移 ----
+    const zones = [
+        { xRange: [0.15, 0.85], yRange: [-0.05, 0.05] },   // 顶部
+        { xRange: [-0.05, 0.15], yRange: [-0.05, 0.20] },   // 左上
+        { xRange: [0.85, 1.05],  yRange: [-0.05, 0.20] },   // 右上
+        { xRange: [-0.05, 0.05], yRange: [0.10, 0.45] },    // 左侧
+        { xRange: [0.95, 1.05],  yRange: [0.10, 0.45] },    // 右侧
+    ];
+    const zone = zones[launchVariant % zones.length];
+    launchVariant++;
+
+    const sx = W * (zone.xRange[0] + Math.random() * (zone.xRange[1] - zone.xRange[0]));
+    const sy = H * (zone.yRange[0] + Math.random() * (zone.yRange[1] - zone.yRange[0]));
+
+    // ---- 初始方向：从起点朝向目标的大致方向，加随机偏移 ----
+    const angleToTarget = Math.atan2(ty - sy, tx - sx);
+    // 在目标方向左右各偏移 15°~45°，产生弧线效果
+    const side = (Math.random() > 0.5 ? 1 : -1);
+    const offset = (Math.PI / 180) * (15 + Math.random() * 30);
+    const baseAngle = angleToTarget + side * offset;
+
+    // 控制点：沿初始方向延伸，距离与起终点距离成正比
+    const dist = Math.sqrt((tx - sx) ** 2 + (ty - sy) ** 2);
+    const cpDist = dist * (0.25 + Math.random() * 0.2);
+    const cpx = sx + Math.cos(baseAngle) * cpDist;
+    const cpy = sy + Math.sin(baseAngle) * cpDist;
+
+    specialMeteor = {
+        sx, sy, cpx, cpy, tx, ty,
+        t: 0,
+        speed: 0.008,
+        x: sx, y: sy,
+        trail: [],
+        lineTrail: [],
+        alive: true
+    };
+}
+
+function updateSpecialMeteor() {
+    if (!specialMeteor || !specialMeteor.alive) return;
+    const m = specialMeteor;
+
+    // 逐渐加速，模拟引力加速效果
+    m.speed += 0.00012;
+    m.t = Math.min(1, m.t + m.speed);
+
+    const nx = bezier(m.t, m.sx, m.cpx, m.tx);
+    const ny = bezier(m.t, m.sy, m.cpy, m.ty);
+
+    // 记录拖尾
+    m.trail.push({ x: nx, y: ny, a: 1 });
+    for (let i = m.trail.length - 1; i >= 0; i--) {
+        m.trail[i].a -= 0.028;
+        if (m.trail[i].a <= 0) m.trail.splice(i, 1);
+    }
+    m.lineTrail.push({ x: nx, y: ny, a: 1 });
+    for (let i = m.lineTrail.length - 1; i >= 0; i--) {
+        m.lineTrail[i].a -= 0.013;
+        if (m.lineTrail[i].a <= 0) m.lineTrail.splice(i, 1);
+    }
+
+    m.x = nx;
+    m.y = ny;
+
+    // 到达终点
+    if (m.t >= 1) {
+        m.alive = false;
+        createBurst(m.tx, m.ty);
+        onMeteorLanded();
+    }
+}
+
+function drawSpecialMeteor() {
+    if (!specialMeteor || !specialMeteor.alive) return;
+    const m = specialMeteor;
+
+    // 渐变长拖尾（连线式）
+    if (m.lineTrail.length > 1) {
+        for (let i = 1; i < m.lineTrail.length; i++) {
+            const p = m.lineTrail[i - 1];
+            const c = m.lineTrail[i];
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(c.x, c.y);
+            ctx.strokeStyle = `rgba(255,215,0,${c.a * 0.4})`;
+            ctx.lineWidth = Math.max(0.5, 3 * c.a);
+            ctx.stroke();
+        }
+    }
+
+    // 散点拖尾
+    for (const t of m.trail) {
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, 2.5 * t.a, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,230,150,${t.a * 0.45})`;
+        ctx.fill();
+    }
+
+    // 外层辉光（大范围柔光）
+    const g2 = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, 40);
+    g2.addColorStop(0, 'rgba(255,215,0,0.18)');
+    g2.addColorStop(1, 'rgba(255,215,0,0)');
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 40, 0, Math.PI * 2);
+    ctx.fillStyle = g2;
+    ctx.fill();
+
+    // 内层光晕
+    const g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, 18);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.2, 'rgba(255,240,180,0.9)');
+    g.addColorStop(0.5, 'rgba(255,200,50,0.4)');
+    g.addColorStop(1, 'rgba(255,180,0,0)');
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 18, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+
+    // 核心亮点
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+}
+
+// =====================================================
+//  爆裂特效
+// =====================================================
+const bursts = [];
+
+function createBurst(x, y) {
+    const particles = [];
+    for (let i = 0; i < 50; i++) {
+        const ang = (Math.PI * 2 / 50) * i + Math.random() * 0.15;
+        const spd = 1.5 + Math.random() * 5;
+        particles.push({
+            x, y,
+            vx: Math.cos(ang) * spd,
+            vy: Math.sin(ang) * spd,
+            a: 1,
+            r: 1 + Math.random() * 3,
+            c: Math.random() > 0.4 ? '255,215,0' : '255,180,80'
+        });
+    }
+    bursts.push({ x, y, radius: 0, alpha: 1, particles });
+}
+
+function updateBursts() {
+    for (let i = bursts.length - 1; i >= 0; i--) {
+        const b = bursts[i];
+        b.radius += 5;
+        b.alpha -= 0.018;
+        for (const p of b.particles) {
+            p.x += p.vx; p.y += p.vy;
+            p.vy += 0.04;
+            p.vx *= 0.99;
+            p.a -= 0.013;
+        }
+        if (b.alpha <= 0 && b.particles.every(p => p.a <= 0)) {
+            bursts.splice(i, 1);
+        }
+    }
+}
+
+function drawBursts() {
+    for (const b of bursts) {
+        // 扩散环
+        if (b.alpha > 0) {
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(255,215,0,${b.alpha * 0.55})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // 中心辉光
+            const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.radius);
+            g.addColorStop(0, `rgba(255,215,0,${b.alpha * 0.12})`);
+            g.addColorStop(1, 'rgba(255,215,0,0)');
+            ctx.fillStyle = g;
+            ctx.fill();
+        }
+        // 粒子
+        for (const p of b.particles) {
+            if (p.a > 0) {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, Math.max(0.5, p.r * p.a), 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${p.c},${p.a})`;
+                ctx.fill();
+            }
+        }
+    }
+}
+
+// =====================================================
+//  主动画循环
+// =====================================================
+let frame = 0;
+const flyAwayStars = [];
+
+function mainLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    drawStars();
+
+    frame++;
+    if (frame % 55 === 0) spawnBgMeteor();
+    updateBgMeteors();
+    drawBgMeteors();
+
+    updateSpecialMeteor();
+    drawSpecialMeteor();
+
+    updateBursts();
+    drawBursts();
+
+    updateFlyAwayStars();
+    drawFlyAwayStars();
+
+    requestAnimationFrame(mainLoop);
+}
+mainLoop();
+
+// =====================================================
+//  触摸 / 鼠标事件
+// =====================================================
+let tStartX = 0, tStartY = 0, tStartT = 0;
+
+document.addEventListener('touchstart', e => {
+    // 不拦截按钮上的触摸，让 click 事件正常触发
+    if (e.target.closest('#start-btn') || e.target.closest('#music-btn')) return;
+    tStartX = e.touches[0].clientX;
+    tStartY = e.touches[0].clientY;
+    tStartT = Date.now();
+}, { passive: true });
+
+document.addEventListener('touchend', e => {
+    if (!started) return;
+    const dx = e.changedTouches[0].clientX - tStartX;
+    const dy = e.changedTouches[0].clientY - tStartY;
+    const dt = Date.now() - tStartT;
+    if (dx > 50 && Math.abs(dx) > Math.abs(dy) && dt < 800) {
+        triggerNext();
+    }
+});
+
+// 桌面端鼠标支持
+let mDown = false, mStartX = 0;
+document.addEventListener('mousedown', e => { mDown = true; mStartX = e.clientX; });
+document.addEventListener('mouseup', e => {
+    if (started && mDown && e.clientX - mStartX > 50) triggerNext();
+    mDown = false;
+});
+
+// 键盘支持（桌面调试）
+document.addEventListener('keydown', e => {
+    if (started && (e.key === 'ArrowRight' || e.key === ' ')) {
+        e.preventDefault();
+        triggerNext();
+    }
+});
+
+// =====================================================
+//  开场
+// =====================================================
+function handleStart() {
+    if (started) return;
+    started = true;
+    overlay.classList.add('hidden');
+    hint.style.opacity = '1';
+    initMusic();
+}
+startBtn.addEventListener('click', handleStart);
+startBtn.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    handleStart();
+});
+
+// =====================================================
+//  音乐
+// =====================================================
+function initMusic() {
+    if (!musicUrl) return;
+    audio = new Audio(musicUrl);
+    audio.loop = true;
+    audio.volume = 0.6;
+    audio.play().then(() => { musicPlaying = true; }).catch(() => {});
+}
+
+musicBtn.addEventListener('click', () => {
+    if (!audio) {
+        if (musicUrl) { audio = new Audio(musicUrl); audio.loop = true; audio.volume = 0.6; }
+    }
+    if (!audio) return;
+    if (musicPlaying) {
+        audio.pause(); musicPlaying = false;
+        musicBtn.innerHTML = '&#9835;';
+        musicBtn.style.borderColor = 'rgba(255,255,255,0.15)';
+    } else {
+        audio.play().then(() => { musicPlaying = true; }).catch(() => {});
+        musicBtn.innerHTML = '&#9835;';
+        musicBtn.style.borderColor = 'rgba(255,200,100,0.5)';
+    }
+});
+
+// =====================================================
+//  触发下一颗流星
+// =====================================================
+function triggerNext() {
+    if (isAnimating) return;
+
+    isAnimating = true;
+
+    // 首次触发隐藏提示
+    if (currentIndex === 0) {
+        hint.style.opacity = '0';
+    }
+
+    // 如果当前有卡片，移入画廊
+    if (currentCard) {
+        settleCard(currentCard, (currentIndex - 1 + albumData.length) % albumData.length);
+    }
+
+    launchSpecialMeteor();
+}
+
+// =====================================================
+//  流星落地 → 创建卡片
+// =====================================================
+function onMeteorLanded() {
+    const data = albumData[currentIndex];
+    const card  = createCard(data);
+    stage.appendChild(card);
+    currentCard = card;
+
+    animateCard(card, () => {
+        currentIndex = (currentIndex + 1) % albumData.length;
+        updateProgress();
+        isAnimating = false;
+    });
+}
+
+// =====================================================
+//  创建卡片 DOM
+// =====================================================
+function createCard(data) {
+    const w = Math.min(280, window.innerWidth * 0.65);
+    const h = w * 1.3;
+
+    const card = document.createElement('div');
+    card.className = 'album-card';
+    card.style.width  = w + 'px';
+    card.style.height = h + 'px';
+
+    card.innerHTML = `
+        <div class="card-inner">
+            <div class="card-front" style="background-image:url('${data.image}')"></div>
+            <div class="card-back">
+                <div class="deco-line"></div>
+                <div class="card-text">${data.text.replace(/\n/g, '<br>')}</div>
+                <div class="scroll-hint">滑动查看更多</div>
+                <div class="deco-line"></div>
+            </div>
+        </div>
+    `;
+
+    // 文字滚动时隐藏提示
+    const textEl = card.querySelector('.card-text');
+    const scrollHint = card.querySelector('.scroll-hint');
+    textEl.addEventListener('scroll', () => {
+        if (textEl.scrollTop > 10) scrollHint.classList.add('hidden');
+    });
+
+    // 点击翻面
+    card.addEventListener('click', (e) => {
+        // 文字区域内容超出时，点击文字区域不翻转（允许滚动）
+        if (e.target.closest('.card-text') && textEl.scrollHeight > textEl.clientHeight + 4) {
+            return;
+        }
+        const inner = card.querySelector('.card-inner');
+        inner.classList.toggle('flipped');
+    });
+
+    return card;
+}
+
+// =====================================================
+//  卡片动画序列
+// =====================================================
+function animateCard(card, onDone) {
+    // 1) 缩放出现
+    requestAnimationFrame(() => {
+        card.style.transition = 'transform 0.35s cubic-bezier(0.34,1.56,0.64,1)';
+        card.style.transform  = 'translate(-50%,-50%) scale(0.18)';
+
+        // 2) 增长到中等
+        setTimeout(() => {
+            card.style.transition = 'transform 0.75s cubic-bezier(0.34,1.56,0.64,1)';
+            card.style.transform  = 'translate(-50%,-50%) scale(0.6)';
+
+            // 3) 增长到接近满
+            setTimeout(() => {
+                card.style.transition = 'transform 0.55s ease-out';
+                card.style.transform  = 'translate(-50%,-50%) scale(0.92)';
+
+                // 4) 翻转显示文字
+                setTimeout(() => {
+                    card.querySelector('.card-inner').classList.add('flipped');
+
+                    // 5) 完成，启用点击交互
+                    setTimeout(() => {
+                        card.classList.add('interactive');
+                        onDone();
+                    }, 1600);
+                }, 650);
+            }, 850);
+        }, 400);
+    });
+}
+
+// =====================================================
+//  卡片飞走动画：缩成星星 → 流星飞出屏幕
+// =====================================================
+
+function settleCard(card, idx) {
+    // 创建缩略图
+    const thumb = document.createElement('div');
+    thumb.className = 'gallery-thumb';
+    thumb.style.backgroundImage = `url('${albumData[idx].image}')`;
+    gallery.appendChild(thumb);
+    requestAnimationFrame(() => thumb.classList.add('visible'));
+
+    // 获取卡片在屏幕中的中心位置
+    const rect = card.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+
+    // 随机飞出方向（朝下方/侧下方飞走，不会往上飞）
+    const flyAngles = [
+        Math.PI * 0.25,   // 右下
+        Math.PI * 0.4,    // 偏右下
+        Math.PI * 0.6,    // 偏左下
+        Math.PI * 0.75,   // 左下
+    ];
+    const flyAngle = flyAngles[Math.floor(Math.random() * flyAngles.length)] + (Math.random() - 0.5) * 0.2;
+
+    // 第一阶段：卡片缩成小星星
+    card.classList.remove('interactive');
+    card.style.transition = 'transform 0.4s ease-in, opacity 0.4s ease-in';
+    card.style.transform  = 'translate(-50%,-50%) scale(0.08)';
+    card.style.opacity    = '0';
+
+    // 第二阶段：canvas 上画星星飞走
+    setTimeout(() => {
+        card.remove();
+        flyAwayStars.push({
+            x: cx, y: cy,
+            vx: Math.cos(flyAngle) * (4 + Math.random() * 3),
+            vy: Math.sin(flyAngle) * (4 + Math.random() * 3),
+            trail: [],
+            alpha: 1,
+            size: 5
+        });
+    }, 420);
+}
+
+function updateFlyAwayStars() {
+    for (let i = flyAwayStars.length - 1; i >= 0; i--) {
+        const s = flyAwayStars[i];
+        s.trail.push({ x: s.x, y: s.y, a: s.alpha });
+        for (let j = s.trail.length - 1; j >= 0; j--) {
+            s.trail[j].a -= 0.04;
+            if (s.trail[j].a <= 0) s.trail.splice(j, 1);
+        }
+        s.x += s.vx;
+        s.y += s.vy;
+        s.vx *= 1.02;
+        s.vy *= 1.02;
+        s.alpha -= 0.012;
+
+        if (s.alpha <= 0 || s.x < -50 || s.x > canvas.width + 50 || s.y > canvas.height + 50) {
+            flyAwayStars.splice(i, 1);
+        }
+    }
+}
+
+function drawFlyAwayStars() {
+    for (const s of flyAwayStars) {
+        // 拖尾
+        for (const t of s.trail) {
+            ctx.beginPath();
+            ctx.arc(t.x, t.y, 2 * t.a, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(200,220,255,${t.a * 0.4})`;
+            ctx.fill();
+        }
+        // 星星本体
+        const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.size);
+        g.addColorStop(0, `rgba(255,255,255,${s.alpha})`);
+        g.addColorStop(0.4, `rgba(200,220,255,${s.alpha * 0.7})`);
+        g.addColorStop(1, `rgba(150,180,255,0)`);
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fillStyle = g;
+        ctx.fill();
+    }
+}
+
+// =====================================================
+//  进度
+// =====================================================
+function updateProgress() {
+    progress.textContent = `${currentIndex} / ${albumData.length}`;
+}
+updateProgress();
+
+// =====================================================
+//  预加载图片
+// =====================================================
+albumData.forEach(item => { const i = new Image(); i.src = item.image; });
+</script>
+</body>
+</html>
